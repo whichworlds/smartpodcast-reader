@@ -1,4 +1,5 @@
 'use strict';
+const APP_VERSION='2026.11.23-3';
 const $=id=>document.getElementById(id),audio=$('audio'),P=PhoneReader,L=I18n,t=L.t;
 const state={offline:'offlinePreparing',book:null,words:[],index:-2,url:null,request:0,paragraph:false,section:-1,pending:null,wake:null,wakeRequest:0,lastSave:0};
 function readLocal(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}}
@@ -137,4 +138,4 @@ function applyLanguage(){L.applyStatic();applyStep();$('languageSelect').value=L
 function changeLanguage(value){L.setLanguage(value);applyLanguage();renderLibrary().catch(message);}
 $('language').onclick=()=>changeLanguage(L.language==='de'?'tr':'de');$('languageSelect').onchange=()=>changeLanguage($('languageSelect').value);
 async function offlineSetup(){if(!('serviceWorker' in navigator)||!window.isSecureContext){setOffline('offlineHttps');return;}try{await navigator.serviceWorker.register('sw.js');await navigator.serviceWorker.ready;setOffline('offlineReady');}catch{setOffline('offlineFailed');}}
-applyLanguage();applySettings();dbReady.then(renderLibrary).catch(error=>message(Error(t('storageOpenFailed')+L.translateError(error.message))));offlineSetup();
+$('appVersion').textContent='v'+APP_VERSION;applyLanguage();applySettings();dbReady.then(renderLibrary).catch(error=>message(Error(t('storageOpenFailed')+L.translateError(error.message))));offlineSetup();

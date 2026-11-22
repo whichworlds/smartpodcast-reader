@@ -27,3 +27,4 @@ body{-webkit-tap-highlight-color:transparent}
 .focus-progress span{display:block;height:100%;width:0;background:var(--accent)}
 .reader.focus .focus-progress{opacity:.25}
 .word-stage{cursor:pointer}
+.app-version{display:block;margin-top:6px;font-size:10px;opacity:.6}
