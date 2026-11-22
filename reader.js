@@ -84,7 +84,9 @@ function seek(time){if(!state.book)return;const position=Math.max(0,Math.min(sta
 const focus={on:false,timer:0,reveal:0};
 function canFocus(){return !!state.book&&!state.paragraph&&!audio.paused&&!$('reader').hidden&&!$('settings').open;}
 function scheduleFocus(){clearTimeout(focus.timer);if(!focus.on&&canFocus())focus.timer=setTimeout(()=>{if(canFocus())setFocus(true);},4000);}
-function enterFullscreen(){const root=document.documentElement;if(!document.fullscreenElement&&root.requestFullscreen)root.requestFullscreen({navigationUI:'hide'}).catch(()=>{});}
+// The installed app has no address bar; asking for fullscreen there only adds Chrome's exit notice.
+function installedApp(){return ['standalone','fullscreen','minimal-ui'].some(mode=>matchMedia(`(display-mode: ${mode})`).matches);}
+function enterFullscreen(){const root=document.documentElement;if(!installedApp()&&!document.fullscreenElement&&root.requestFullscreen)root.requestFullscreen({navigationUI:'hide'}).catch(()=>{});}
 function leaveFullscreen(){if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});}
 function setFocus(on){
  if(on===focus.on){if(!on)scheduleFocus();return;}
