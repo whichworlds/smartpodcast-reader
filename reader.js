@@ -3,7 +3,8 @@ const $=id=>document.getElementById(id),audio=$('audio'),P=PhoneReader,L=I18n,t=
 const state={offline:'offlinePreparing',book:null,words:[],index:-2,url:null,request:0,paragraph:false,section:-1,pending:null,wake:null,wakeRequest:0,lastSave:0};
 function readLocal(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}}
 function writeLocal(key,value){try{localStorage.setItem(key,JSON.stringify(value));return true;}catch{return false;}}
-const settings=readLocal('sp.phone.settings',{rate:1,font:64,theme:'dark',awake:true,brightness:100});
+const settings=readLocal('sp.phone.settings',{rate:1,font:64,theme:'dark',awake:true,brightness:100,step:5});
+if(![5,10,15,30].includes(settings.step))settings.step=5;
 if(![.75,1,1.25,1.5,1.75,2].includes(settings.rate))settings.rate=1;
 settings.font=Math.max(30,Math.min(100,Number(settings.font)||64));
 let database;
@@ -49,7 +50,7 @@ function savePosition(force=false){
  state.lastSave=Date.now();if(!writeLocal('sp.phone.position:'+state.book.id,{revision:state.book.revision,position:Math.max(0,Math.min(state.book.duration,audio.currentTime||0))}))$('playerStatus').textContent=t('positionFailed');
 }
 async function openBook(id,autoplay=false){
- const request=++state.request;savePosition(true);audio.pause();
+ setFocus(false);const request=++state.request;savePosition(true);audio.pause();
  const [book,track]=await Promise.all([dbRead('books',id),dbRead('audio',id)]);if(request!==state.request)return;
  if(!book||!track?.blob)throw Error('Kitap bulunamadı. Paketi yeniden ekle.');
  audio.removeAttribute('src');audio.load();if(state.url)URL.revokeObjectURL(state.url);
@@ -71,7 +72,7 @@ function update(){
  if(state.paragraph){if(state.section!==sectionIndex)renderParagraph(sectionIndex);const old=$('paragraph').querySelector('.active'),active=$('paragraph').querySelector(`[data-word="${word?.wordIndex}"]`);if(old!==active){old?.classList.remove('active');active?.classList.add('active');}}
  if(document.activeElement!==$('seek'))$('seek').value=time;
  const rate=audio.playbackRate||settings.rate;$('seek').setAttribute('aria-valuetext',P.clock(time/rate)+' / '+P.clock(state.book.duration/rate));$('elapsed').textContent=P.clock(time/rate);$('remaining').textContent=t('remaining')+P.clock(P.remaining(state.book.duration,time,rate));
- $('play').textContent=audio.paused?'▶':'Ⅱ';$('play').setAttribute('aria-label',t(audio.paused?'play':'pause'));savePosition();
+ $('focusProgress').firstChild.style.width=Math.min(100,100*time/state.book.duration)+'%';$('play').textContent=audio.paused?'▶':'Ⅱ';$('play').setAttribute('aria-label',t(audio.paused?'play':'pause'));savePosition();
 }
 function renderParagraph(index){
  state.section=index;$('sectionPicker').value=index;const section=state.book.sections[index],points=Array.from(section.text);let cursor=0;const content=document.createDocumentFragment();
@@ -79,22 +80,39 @@ function renderParagraph(index){
  content.append(document.createTextNode(points.slice(cursor).join('')));$('paragraph').replaceChildren(content);$('paragraphPanel').scrollTop=0;
 }
 function seek(time){if(!state.book)return;const position=Math.max(0,Math.min(state.book.duration,time));if(state.pending!==null)state.pending=position;else audio.currentTime=position;update();savePosition(true);}
-function sentence(direction){
- if(!state.book)return;const time=state.pending??audio.currentTime,at=Math.max(0,P.wordAt(state.words,time)),boundaries=[0];
- for(let i=1;i<state.words.length;i++)if(/[.!?…]["'»”)]*$/.test(state.words[i-1].word))boundaries.push(i);
- const target=direction<0?[...boundaries].reverse().find(i=>state.words[i].start<time-.5):boundaries.find(i=>i>at);
- seek(target===undefined?(direction<0?0:state.book.duration):state.words[target].start);
+// Focus mode: only the word stays; faint transport and a hairline progress remain.
+const focus={on:false,timer:0,reveal:0};
+function canFocus(){return !!state.book&&!state.paragraph&&!audio.paused&&!$('reader').hidden&&!$('settings').open;}
+function scheduleFocus(){clearTimeout(focus.timer);if(!focus.on&&canFocus())focus.timer=setTimeout(()=>{if(canFocus())setFocus(true);},4000);}
+function enterFullscreen(){const root=document.documentElement;if(!document.fullscreenElement&&root.requestFullscreen)root.requestFullscreen({navigationUI:'hide'}).catch(()=>{});}
+function leaveFullscreen(){if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});}
+function setFocus(on){
+ if(on===focus.on){if(!on)scheduleFocus();return;}
+ focus.on=on;$('reader').classList.toggle('focus',on);$('reader').classList.remove('reveal');clearTimeout(focus.timer);clearTimeout(focus.reveal);
+ if(on)history.pushState({focus:true},'');else{if(history.state?.focus)history.back();scheduleFocus();}
 }
+function revealControls(){$('reader').classList.add('reveal');clearTimeout(focus.reveal);focus.reveal=setTimeout(()=>$('reader').classList.remove('reveal'),3000);}
+$('reader').addEventListener('click',event=>{
+ if(focus.on){if(event.target.closest('.transport')){revealControls();return;}event.preventDefault();event.stopPropagation();setFocus(false);return;}
+ if(event.target.closest('#wordStage')&&state.book&&!state.paragraph){enterFullscreen();setFocus(true);return;}
+ scheduleFocus();
+},true);
+$('reader').addEventListener('input',scheduleFocus,true);
+window.addEventListener('popstate',()=>{if(focus.on){focus.on=false;$('reader').classList.remove('focus','reveal');scheduleFocus();}});
+document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&focus.on)setFocus(false);});
+audio.addEventListener('play',scheduleFocus);audio.addEventListener('pause',()=>clearTimeout(focus.timer));
 async function togglePlay(){if(!state.book)return;try{if(audio.paused)await audio.play();else audio.pause();}catch{$('playerStatus').textContent=t('playFailed');}}
 let frame;
 function animate(){update();if(!audio.paused)frame=requestAnimationFrame(animate);}
 audio.addEventListener('loadedmetadata',()=>{if(!state.book)return;audio.playbackRate=settings.rate;if(state.pending!==null){audio.currentTime=state.pending;state.pending=null;}update();});
 audio.addEventListener('timeupdate',update);audio.addEventListener('play',()=>{cancelAnimationFrame(frame);animate();syncWake();});audio.addEventListener('pause',()=>{cancelAnimationFrame(frame);update();savePosition(true);syncWake();});audio.addEventListener('ended',()=>{update();savePosition(true);});audio.addEventListener('error',()=>{if(state.book)$('playerStatus').textContent=t('mp3Failed');});
-$('play').onclick=togglePlay;$('rewind').onclick=()=>seek((state.pending??audio.currentTime)-10);$('forward').onclick=()=>seek((state.pending??audio.currentTime)+10);$('previousSentence').onclick=()=>sentence(-1);$('nextSentence').onclick=()=>sentence(1);$('seek').oninput=()=>seek(Number($('seek').value));
+$('play').onclick=()=>{if(audio.paused)enterFullscreen();togglePlay();};$('rewind').onclick=()=>seek((state.pending??audio.currentTime)-settings.step);$('forward').onclick=()=>seek((state.pending??audio.currentTime)+settings.step);
+for(const id of ['stepBack','stepForward'])$(id).onclick=()=>{const steps=[5,10,15,30];settings.step=steps[(steps.indexOf(settings.step)+1)%steps.length];saveSettings();};
+function applyStep(){const n=String(settings.step);for(const id of ['stepBack','stepForward']){$(id).textContent=n+' '+t('sec');$(id).setAttribute('aria-label',t('step').replace('{n}',n));}$('rewind').setAttribute('aria-label',t('rewind').replace('{n}',n));$('forward').setAttribute('aria-label',t('forward').replace('{n}',n));}$('seek').oninput=()=>seek(Number($('seek').value));
 $('rate').onchange=()=>{settings.rate=Number($('rate').value);audio.playbackRate=settings.rate;audio.preservesPitch=true;saveSettings();update();};
 $('sectionPicker').onchange=()=>{const index=Number($('sectionPicker').value);seek(state.book.sections[index].start);renderParagraph(index);};
 $('paragraphToggle').onclick=()=>{state.paragraph=!state.paragraph;$('paragraphPanel').hidden=!state.paragraph;$('wordStage').hidden=state.paragraph;$('paragraphToggle').textContent=t(state.paragraph?'singleWord':'showParagraph');state.section=-1;update();fitWord();};
-$('back').onclick=()=>{++state.request;savePosition(true);audio.pause();state.book=null;audio.removeAttribute('src');audio.load();if(state.url)URL.revokeObjectURL(state.url);state.url=null;$('reader').hidden=true;$('library').hidden=false;document.title=t('title');syncWake();renderLibrary().catch(message);};
+$('back').onclick=()=>{setFocus(false);leaveFullscreen();++state.request;savePosition(true);audio.pause();state.book=null;audio.removeAttribute('src');audio.load();if(state.url)URL.revokeObjectURL(state.url);state.url=null;$('reader').hidden=true;$('library').hidden=false;document.title=t('title');syncWake();renderLibrary().catch(message);};
 $('packages').onchange=async()=>{
  const files=[...$('packages').files];$('packages').disabled=true;
  try{
@@ -106,14 +124,14 @@ $('packages').onchange=async()=>{
  }catch(error){message(error);await renderLibrary().catch(()=>{});}finally{$('packages').disabled=false;$('packages').value='';}
 };
 function saveSettings(){writeLocal('sp.phone.settings',settings);applySettings();}
-function applySettings(){document.body.classList.toggle('paper',settings.theme==='paper');$('rate').value=settings.rate;document.documentElement.style.setProperty('--font',settings.font+'px');document.documentElement.style.setProperty('--brightness',Math.max(.45,Math.min(1,(settings.brightness||100)/100)));$('fontSize').value=settings.font;$('theme').value=settings.theme==='paper'?'paper':'dark';$('keepAwake').checked=!!settings.awake;$('brightness').value=settings.brightness||100;fitWord();syncWake();}
+function applySettings(){applyStep();document.body.classList.toggle('paper',settings.theme==='paper');$('rate').value=settings.rate;document.documentElement.style.setProperty('--font',settings.font+'px');document.documentElement.style.setProperty('--brightness',Math.max(.45,Math.min(1,(settings.brightness||100)/100)));$('fontSize').value=settings.font;$('theme').value=settings.theme==='paper'?'paper':'dark';$('keepAwake').checked=!!settings.awake;$('brightness').value=settings.brightness||100;fitWord();syncWake();}
 $('settingsButton').onclick=()=>$('settings').showModal();$('fontSize').oninput=()=>{settings.font=Number($('fontSize').value);saveSettings();};$('theme').onchange=()=>{settings.theme=$('theme').value;saveSettings();};$('keepAwake').onchange=()=>{settings.awake=$('keepAwake').checked;saveSettings();};$('brightness').oninput=()=>{settings.brightness=Number($('brightness').value);saveSettings();};
 async function syncWake(){const version=++state.wakeRequest,wanted=!!state.book&&settings.awake&&document.visibilityState==='visible';if(!wanted){await state.wake?.release().catch(()=>{});state.wake=null;return;}if(state.wake&&!state.wake.released)return;try{const lock=await navigator.wakeLock?.request('screen');if(version!==state.wakeRequest){await lock?.release();return;}state.wake=lock;}catch{}}
 document.addEventListener('visibilitychange',()=>{savePosition(true);syncWake();if(document.visibilityState==='visible')update();});window.addEventListener('pagehide',()=>savePosition(true));window.addEventListener('resize',fitWord);
 if('mediaSession' in navigator)for(const [action,handler] of Object.entries({play:()=>audio.play().catch(()=>{}),pause:()=>audio.pause(),seekbackward:()=>seek(audio.currentTime-10),seekforward:()=>seek(audio.currentTime+10),seekto:d=>seek(d.seekTime)})){try{navigator.mediaSession.setActionHandler(action,handler);}catch{}}
 let installPrompt;window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();installPrompt=event;$('install').hidden=false;});$('install').onclick=async()=>{if(installPrompt){await installPrompt.prompt();installPrompt=null;$('install').hidden=true;}else $('helpDialog').showModal();};$('help').onclick=()=>$('helpDialog').showModal();window.addEventListener('appinstalled',()=>{$('install').hidden=true;});
 function setOffline(key){state.offline=key;$('offlineStatus').textContent=t(key);}
-function applyLanguage(){L.applyStatic();$('languageSelect').value=L.language;$('offlineStatus').textContent=t(state.offline);document.title=state.book?state.book.source_title+t('appSuffix'):t('title');$('paragraphToggle').textContent=t(state.paragraph?'singleWord':'showParagraph');if(state.book){state.index=-2;update();}else $('word').textContent=t('ready');}
+function applyLanguage(){L.applyStatic();applyStep();$('languageSelect').value=L.language;$('offlineStatus').textContent=t(state.offline);document.title=state.book?state.book.source_title+t('appSuffix'):t('title');$('paragraphToggle').textContent=t(state.paragraph?'singleWord':'showParagraph');if(state.book){state.index=-2;update();}else $('word').textContent=t('ready');}
 function changeLanguage(value){L.setLanguage(value);applyLanguage();renderLibrary().catch(message);}
 $('language').onclick=()=>changeLanguage(L.language==='de'?'tr':'de');$('languageSelect').onchange=()=>changeLanguage($('languageSelect').value);
 async function offlineSetup(){if(!('serviceWorker' in navigator)||!window.isSecureContext){setOffline('offlineHttps');return;}try{await navigator.serviceWorker.register('sw.js');await navigator.serviceWorker.ready;setOffline('offlineReady');}catch{setOffline('offlineFailed');}}
