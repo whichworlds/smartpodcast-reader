@@ -70,7 +70,7 @@ function update(){
  $('chapterTitle').textContent=state.book.sections[sectionIndex].label;
  if(state.paragraph){if(state.section!==sectionIndex)renderParagraph(sectionIndex);const old=$('paragraph').querySelector('.active'),active=$('paragraph').querySelector(`[data-word="${word?.wordIndex}"]`);if(old!==active){old?.classList.remove('active');active?.classList.add('active');}}
  if(document.activeElement!==$('seek'))$('seek').value=time;
- $('seek').setAttribute('aria-valuetext',P.clock(time)+' / '+P.clock(state.book.duration));$('elapsed').textContent=P.clock(time)+' / '+P.clock(state.book.duration);$('remaining').textContent=t('remaining')+P.clock(P.remaining(state.book.duration,time,audio.playbackRate||settings.rate));
+ const rate=audio.playbackRate||settings.rate;$('seek').setAttribute('aria-valuetext',P.clock(time/rate)+' / '+P.clock(state.book.duration/rate));$('elapsed').textContent=P.clock(time/rate);$('remaining').textContent=t('remaining')+P.clock(P.remaining(state.book.duration,time,rate));
  $('play').textContent=audio.paused?'▶':'Ⅱ';$('play').setAttribute('aria-label',t(audio.paused?'play':'pause'));savePosition();
 }
 function renderParagraph(index){
