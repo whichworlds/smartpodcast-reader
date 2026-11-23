@@ -1,5 +1,5 @@
 'use strict';
-const CACHE='smartpodcast-phone-v10';
+const CACHE='smartpodcast-phone-v11';
 const SHELL=['./','index.html','i18n.js','core.js','reader.js','reader.css','manifest.webmanifest','icon-192.png','icon-512.png'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL.map(url=>new Request(url,{cache:'reload'})))).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith('smartpodcast-phone-')&&key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));

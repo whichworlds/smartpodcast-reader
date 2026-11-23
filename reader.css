@@ -45,3 +45,12 @@ body{-webkit-tap-highlight-color:transparent}
 body.reordering{overflow-anchor:none;-webkit-user-select:none;user-select:none}
 .book-tree,.book-group{-webkit-touch-callout:none}
 .dragging .order-handle{background:var(--accent);color:#1a281c;border-color:var(--accent);cursor:grabbing}
+.picker-button{display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--panel);border:1px solid var(--line);color:var(--ink);font:inherit;cursor:pointer}
+.picker-button.pill{border-radius:99px;min-height:38px;padding:0 12px 0 14px;font-size:13px;font-variant-numeric:tabular-nums}
+.picker-button.field{width:100%;border-radius:12px;min-height:44px;padding:0 14px;font-size:13px;text-align:left}
+.picker-button.field>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.picker-chevron{color:var(--muted);font-size:12px;line-height:1}
+.paragraph-panel .picker-button{margin:5px 0 20px}
+.picker-list{display:grid;gap:6px;max-height:60dvh;overflow:auto}
+.picker-list .sleep-option{text-align:left;padding:10px 14px;line-height:1.4}
+.picker-button:focus-visible,.sleep-option:focus-visible{outline:2px solid var(--accent);outline-offset:3px}

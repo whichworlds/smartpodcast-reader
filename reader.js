@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='2026.11.23-10';
+const APP_VERSION='2026.11.23-11';
 const $=id=>document.getElementById(id),audio=$('audio'),P=PhoneReader,L=I18n,t=L.t;
 const state={offline:'offlinePreparing',book:null,words:[],index:-2,url:null,request:0,paragraph:false,section:-1,pending:null,wake:null,wakeRequest:0,lastSave:0};
 function readLocal(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}}
@@ -211,6 +211,27 @@ audio.addEventListener('timeupdate',update);audio.addEventListener('play',()=>{c
 $('play').onclick=()=>{if(audio.paused)enterFullscreen();togglePlay();};$('rewind').onclick=()=>seek((state.pending??audio.currentTime)-settings.step);$('forward').onclick=()=>seek((state.pending??audio.currentTime)+settings.step);
 for(const id of ['stepBack','stepForward'])$(id).onclick=()=>{const steps=[5,10,15,30];settings.step=steps[(steps.indexOf(settings.step)+1)%steps.length];saveSettings();};
 function applyStep(){const n=String(settings.step);for(const id of ['stepBack','stepForward']){$(id).textContent=n+' '+t('sec');$(id).setAttribute('aria-label',t('step').replace('{n}',n));}$('rewind').setAttribute('aria-label',t('rewind').replace('{n}',n));$('forward').setAttribute('aria-label',t('forward').replace('{n}',n));}$('seek').oninput=()=>seek(Number($('seek').value));
+// Native <select> opens Android's own picker, which ignores the app theme. Each select stays
+// the source of truth but is shown as a themed button that opens the same sheet style as the
+// sleep timer; programmatic value and option changes keep the button text in sync.
+const selectValue=Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value');
+function themedSelect(select){
+ const button=node('button',undefined,'picker-button '+(select.closest('.rate-label')?'pill':'field'));button.type='button';
+ const label=node('span');button.append(label,node('span','⌄','picker-chevron'));
+ const title=()=>select.closest('label')?.querySelector(':scope>span')?.textContent||document.querySelector(`label[for="${select.id}"]`)?.textContent||select.getAttribute('aria-label')||'';
+ const sync=()=>{label.textContent=select.selectedOptions[0]?.textContent||'';button.setAttribute('aria-label',title()+': '+label.textContent);};
+ Object.defineProperty(select,'value',{configurable:true,get(){return selectValue.get.call(this);},set(v){selectValue.set.call(this,v);sync();}});
+ new MutationObserver(sync).observe(select,{childList:true,subtree:true,characterData:true});
+ button.onclick=()=>{
+  const options=[...select.options],compact=options.length<=9&&options.every(o=>o.textContent.length<=10);
+  $('pickerTitle').textContent=title();$('pickerOptions').className=compact?'sleep-options':'picker-list';
+  $('pickerOptions').replaceChildren(...options.map(option=>{const b=node('button',option.textContent,'sleep-option');b.type='button';if(option.selected)b.classList.add('active');
+   b.onclick=()=>{$('pickerDialog').close();if(select.value!==option.value){select.value=option.value;select.dispatchEvent(new Event('change'));}};return b;}));
+  $('pickerDialog').showModal();$('pickerOptions').querySelector('.active')?.scrollIntoView({block:'center'});
+ };
+ select.hidden=true;select.after(button);sync();return button;
+}
+for(const id of ['rate','sectionPicker','theme','languageSelect'])themedSelect($(id));
 $('rate').onchange=()=>{settings.rate=Number($('rate').value);audio.playbackRate=settings.rate;audio.preservesPitch=true;saveSettings();update();};
 $('sectionPicker').onchange=()=>{const index=Number($('sectionPicker').value);seek(state.book.sections[index].start);renderParagraph(index);};
 $('paragraphToggle').onclick=()=>{state.paragraph=!state.paragraph;$('paragraphPanel').hidden=!state.paragraph;$('wordStage').hidden=state.paragraph;$('paragraphToggle').textContent=t(state.paragraph?'singleWord':'showParagraph');state.section=-1;update();fitWord();};
