@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='2026.11.23-9';
+const APP_VERSION='2026.11.23-10';
 const $=id=>document.getElementById(id),audio=$('audio'),P=PhoneReader,L=I18n,t=L.t;
 const state={offline:'offlinePreparing',book:null,words:[],index:-2,url:null,request:0,paragraph:false,section:-1,pending:null,wake:null,wakeRequest:0,lastSave:0};
 function readLocal(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}}
@@ -75,7 +75,6 @@ function orderHandle(item,key,number){
 function startDrag(item,pointerId,startY){
  const list=$('books');reorder.item=item;
  try{item.setPointerCapture(pointerId);}catch{}
- navigator.vibrate?.(15);
  const grab=startY-item.getBoundingClientRect().top;let y=startY,frame=0;
  item.classList.add('dragging');document.body.classList.add('reordering');
  const slide=(el,from)=>{const to=el.getBoundingClientRect().top;if(from!==to)el.animate([{transform:`translateY(${from-to}px)`},{transform:'none'}],{duration:160,easing:'ease-out'});};
@@ -88,7 +87,7 @@ function startDrag(item,pointerId,startY){
    if(next?.dataset.orderKey){const r=next.getBoundingClientRect();if(center>r.top+r.height/2){const from=r.top;list.insertBefore(next,item);slide(next,from);moved=true;continue;}}
    break;
   }
-  if(moved){renumber();navigator.vibrate?.(6);}
+  if(moved)renumber();
   item.style.transform=`translateY(${top-item.getBoundingClientRect().top}px)`;
  };
  const tick=()=>{const edge=90;if(y<edge)scrollBy(0,-Math.ceil((edge-y)/6));else if(y>innerHeight-edge)scrollBy(0,Math.ceil((y-innerHeight+edge)/6));follow();frame=requestAnimationFrame(tick);};
