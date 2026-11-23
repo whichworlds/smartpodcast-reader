@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='2026.11.23-7';
+const APP_VERSION='2026.11.23-8';
 const $=id=>document.getElementById(id),audio=$('audio'),P=PhoneReader,L=I18n,t=L.t;
 const state={offline:'offlinePreparing',book:null,words:[],index:-2,url:null,request:0,paragraph:false,section:-1,pending:null,wake:null,wakeRequest:0,lastSave:0};
 function readLocal(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}}
@@ -33,18 +33,46 @@ async function renderLibrary(){
  for(const book of books.sort((a,b)=>a.source_title.localeCompare(b.source_title,L.language)||a.source_offset-b.source_offset)){
   const key=book.source_id+'|'+book.language;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(book);
  }
- $('bookCount').textContent=groups.size;$('empty').hidden=books.length>0;
- for(const [key,group] of groups){
+  $('bookCount').textContent=groups.size;$('empty').hidden=books.length>0;
+ // User order from drag and drop; books never placed by hand keep their default order after the placed ones.
+ const rank=new Map(readLocal('sp.phone.order',[]).map((key,index)=>[key,index])),keys=[...groups.keys()];
+ keys.sort((a,b)=>(rank.has(a)?rank.get(a):1e6+keys.indexOf(a))-(rank.has(b)?rank.get(b):1e6+keys.indexOf(b)));
+ for(const [number,key] of keys.entries()){const group=groups.get(key);
   const range=book=>book.source_duration?`${P.clock(book.source_offset)}–${P.clock(book.source_offset+book.source_duration)}`:P.clock(book.duration);
-  if(group.length===1){const book=group[0],section=node('section',undefined,'book-group');const row=bookRow(book,book.source_title);row.querySelector('strong').after(node('small',`${range(book)} · ${book.language.toUpperCase()}`,'book-meta'));section.append(row);$('books').append(section);continue;}
+   if(group.length===1){const book=group[0],section=node('section',undefined,'book-group');const row=bookRow(book,book.source_title);row.querySelector('strong').after(node('small',`${range(book)} · ${book.language.toUpperCase()}`,'book-meta'));row.prepend(orderHandle(section,key,number));section.append(row);$('books').append(section);continue;}
   const tree=node('details',undefined,'book-tree'),summary=node('summary'),left=group.reduce((sum,book)=>sum+P.remaining(book.duration,bookmark(book)?.position||0,settings.rate),0);
   const started=group.some(book=>(bookmark(book)?.position||0)>0);tree.open=key in expanded?!!expanded[key]:started;
   const text=node('span',undefined,'tree-text');text.append(node('strong',group[0].source_title),node('small',`${group.length} ${t('slices')} · ${group[0].language.toUpperCase()} · ${P.clock(left)}${t('left')}`));
-  summary.append(node('span','›','tree-chevron'),text);tree.append(summary);
+   summary.append(orderHandle(tree,key,number),node('span','›','tree-chevron'),text);tree.append(summary);
   tree.addEventListener('toggle',()=>{const state=readLocal('sp.phone.expanded',{});state[key]=tree.open;writeLocal('sp.phone.expanded',state);});
   const list=node('div',undefined,'tree-items');for(const [index,book] of group.entries())list.append(bookRow(book,`${t('slice')}${index+1} · ${range(book)}`));
   tree.append(list);$('books').append(tree);
  }
+}
+// Hold the number and drag: pointer events, because Android Chrome has no HTML drag and drop.
+function orderHandle(item,key,number){
+ const handle=node('span',String(number+1),'order-handle');item.dataset.orderKey=key;
+ handle.setAttribute('role','button');handle.setAttribute('aria-label',t('dragHint'));handle.title=t('dragHint');
+ handle.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();});
+ handle.addEventListener('pointerdown',event=>{
+  if(event.button>0)return;event.preventDefault();event.stopPropagation();
+  const list=$('books');let moved=false,frame=0,lastY=event.clientY;
+  try{handle.setPointerCapture(event.pointerId);}catch{}
+  item.classList.add('dragging');navigator.vibrate?.(12);
+  const place=y=>{const others=[...list.children].filter(el=>el!==item&&el.dataset.orderKey);
+   const next=others.find(el=>{const r=el.getBoundingClientRect();return y<r.top+r.height/2;});
+   if(next){if(item.nextElementSibling!==next){list.insertBefore(item,next);moved=true;}}else if(list.lastElementChild!==item){list.append(item);moved=true;}};
+  const scroll=()=>{const edge=70;if(lastY<edge)scrollBy(0,-12);else if(lastY>innerHeight-edge)scrollBy(0,12);place(lastY);frame=requestAnimationFrame(scroll);};
+  frame=requestAnimationFrame(scroll);
+  const move=e=>{lastY=e.clientY;place(lastY);};
+  const end=()=>{cancelAnimationFrame(frame);handle.removeEventListener('pointermove',move);handle.removeEventListener('pointerup',end);handle.removeEventListener('pointercancel',end);
+   item.classList.remove('dragging');
+   const order=[...list.children].map(el=>el.dataset.orderKey).filter(Boolean);
+   order.forEach((_,index)=>{const badge=list.children[index]?.querySelector('.order-handle');if(badge)badge.textContent=String(index+1);});
+   if(moved)writeLocal('sp.phone.order',order);};
+  handle.addEventListener('pointermove',move);handle.addEventListener('pointerup',end);handle.addEventListener('pointercancel',end);
+ });
+ return handle;
 }
 function savePosition(force=false){
  if(!state.book||state.pending!==null||(!force&&Date.now()-state.lastSave<2000))return;

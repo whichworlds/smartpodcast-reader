@@ -36,7 +36,7 @@
   gotIt:['Anladım','Verstanden'],
   sleep:['Uyku zamanlayıcısı','Schlaf-Timer'],sleepOff:['Kapalı','Aus'],min:['dk','Min.'],hour:['1 saat','1 Stunde'],sleepSection:['Bölüm bitince','Am Abschnittsende'],sleepEnd:['bölüm sonu','Abschnittsende'],
   sleepNote:['Süre, başlattığın andan itibaren ses çalsa da çalmasa da işler. Son 30 saniyede ses yavaşça kısılır ve durur. Bir sonraki oynatmada uyku süresinin yarısı kadar geri sarılır (1 saat → 30 dk). Zamanlayıcı açıkken ekran kendiliğinden kapanabilir; ses çalmaya devam eder.','Die Zeit läuft ab dem Start, ob Ton läuft oder nicht. In den letzten 30 Sekunden wird der Ton leiser und stoppt. Beim nächsten Abspielen geht es um die halbe Timerdauer zurück (1 Stunde → 30 Min.). Mit Timer darf sich der Bildschirm ausschalten; der Ton läuft weiter.'],
-  ready:['Hazır','Bereit'],slice:['Kesit ','Abschnitt '],slices:['kesit','Abschnitte'],resume:['Devam: ','Weiter: '],left:[' kaldı',' übrig'],remaining:['Kalan ','Noch '],
+  ready:['Hazır','Bereit'],slice:['Kesit ','Abschnitt '],dragHint:['Sıralamak için numarayı basılı tutup sürükle','Zum Sortieren die Nummer halten und ziehen'],slices:['kesit','Abschnitte'],resume:['Devam: ','Weiter: '],left:[' kaldı',' übrig'],remaining:['Kalan ','Noch '],
   play:['Oynat','Abspielen'],pause:['Duraklat','Pause'],listen:['Dinle: ','Anhören: '],
   remove:['Bu cihazdan kaldır: ','Von diesem Gerät entfernen: '],
   removeConfirm:['Bu cihazdan kaldırılsın mı? Bilgisayardaki dosyalar korunur.','Von diesem Gerät entfernen? Die Dateien auf dem Computer bleiben erhalten.'],

@@ -37,3 +37,8 @@ body{-webkit-tap-highlight-color:transparent}
 .sleep-badge{position:absolute;left:0;right:0;bottom:12px;margin:0;text-align:center;font-size:11px;color:var(--muted);opacity:0;pointer-events:none;transition:opacity .6s;font-variant-numeric:tabular-nums}
 .reader.focus .sleep-badge{opacity:.35}
 .reader{position:relative}
+.order-handle{flex:none;display:grid;place-items:center;min-width:34px;height:34px;padding:0 4px;border-radius:10px;border:1px solid var(--line);color:var(--muted);font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;touch-action:none;cursor:grab;-webkit-user-select:none;user-select:none}
+.book-tree summary .order-handle{margin-right:-8px}
+.book-tree summary .tree-chevron{width:28px}
+.dragging{opacity:.92;box-shadow:0 10px 28px rgba(0,0,0,.45);outline:2px solid var(--accent);border-radius:14px;position:relative;z-index:2}
+.dragging .order-handle{background:var(--accent);color:#1a281c;border-color:var(--accent);cursor:grabbing}
