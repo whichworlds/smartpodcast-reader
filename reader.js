@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='2026.11.23-5';
+const APP_VERSION='2026.11.23-6';
 const $=id=>document.getElementById(id),audio=$('audio'),P=PhoneReader,L=I18n,t=L.t;
 const state={offline:'offlinePreparing',book:null,words:[],index:-2,url:null,request:0,paragraph:false,section:-1,pending:null,wake:null,wakeRequest:0,lastSave:0};
 function readLocal(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}}
@@ -104,29 +104,33 @@ $('reader').addEventListener('input',scheduleFocus,true);
 window.addEventListener('popstate',()=>{if(focus.on){focus.on=false;$('reader').classList.remove('focus','reveal');scheduleFocus();}});
 document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&focus.on)setFocus(false);});
 audio.addEventListener('play',scheduleFocus);audio.addEventListener('pause',()=>clearTimeout(focus.timer));
-// Sleep timer: counts real listening time, fades out over the last 30 s, then pauses.
-// The next play of that book starts one minute earlier, since the end was likely missed.
-const FADE=30000,REWIND=60;
-const sleep={mode:null,left:0,last:0,section:-1};
-function sleepLabel(){if(!sleep.mode)return '';return sleep.mode==='section'?t('sleepEnd'):P.clock(Math.ceil(sleep.left/1000));}
+// Sleep timer: runs on the wall clock from the moment it is set, playing or not.
+// It fades out over the last 30 s and pauses; the next play of that book starts
+// half the timer length earlier (section mode: half the time it ran).
+const FADE=30000;
+const sleep={mode:null,deadline:0,started:0,length:0,section:-1,interval:0};
+function sleepLeft(){return Math.max(0,sleep.deadline-Date.now());}
+function sleepLabel(){if(!sleep.mode)return '';return sleep.mode==='section'?t('sleepEnd'):P.clock(Math.ceil(sleepLeft()/1000));}
 function renderSleep(){const label=sleepLabel();$('sleepButton').textContent=label?'☾ '+label:'☾';$('sleepButton').classList.toggle('active',!!sleep.mode);$('sleepBadge').textContent=label?'☾ '+label:'';}
 function setSleep(mode){
- sleep.mode=mode;sleep.last=performance.now();audio.volume=1;
- if(typeof mode==='number'){sleep.left=mode*60000;sleep.mode='time';settings.sleep=mode;saveSettings();}
- if(mode==='section'){sleep.section=state.words[Math.max(0,P.wordAt(state.words,audio.currentTime))]?.sectionIndex??0;settings.sleep='section';saveSettings();}
+ clearInterval(sleep.interval);sleep.mode=null;audio.volume=1;
+ if(typeof mode==='number'){sleep.mode='time';sleep.length=mode*60000;sleep.started=Date.now();sleep.deadline=sleep.started+sleep.length;settings.sleep=mode;saveSettings();}
+ else if(mode==='section'){sleep.mode='section';sleep.started=Date.now();sleep.section=state.words[Math.max(0,P.wordAt(state.words,audio.currentTime))]?.sectionIndex??0;settings.sleep='section';saveSettings();}
+ if(sleep.mode)sleep.interval=setInterval(()=>tickSleep(),1000);
  renderSleep();syncWake();
 }
-function sleepStop(){
- const id=state.book?.id;setSleep(null);audio.pause();audio.volume=1;
- if(id)writeLocal('sp.phone.sleepRewind:'+id,true);
+function sleepFinish(){
+ const id=state.book?.id,playing=!audio.paused,rewind=Math.round((sleep.mode==='time'?sleep.length:Date.now()-sleep.started)/2000);
+ setSleep(null);
+ if(playing){audio.pause();if(id&&rewind>0)writeLocal('sp.phone.sleepRewind:'+id,rewind);}
 }
 function tickSleep(sectionIndex){
- const now=performance.now(),elapsed=now-sleep.last;sleep.last=now;
- if(!sleep.mode||audio.paused)return;
- if(sleep.mode==='section'){if(sectionIndex>sleep.section)sleepStop();else if(sectionIndex<sleep.section)sleep.section=sectionIndex;return;}
- sleep.left-=Math.min(elapsed,15000);
- if(sleep.left<=0){sleepStop();return;}
- audio.volume=Math.max(0,Math.min(1,sleep.left/FADE));renderSleep();
+ if(!sleep.mode)return;
+ if(sleep.mode==='section'){if(!audio.paused&&sectionIndex!==undefined){if(sectionIndex>sleep.section)sleepFinish();else if(sectionIndex<sleep.section)sleep.section=sectionIndex;}return;}
+ const left=sleepLeft();
+ if(left<=0){sleepFinish();return;}
+ if(!audio.paused)audio.volume=Math.max(0,Math.min(1,left/FADE));
+ renderSleep();
 }
 function openSleepDialog(){
  const options=[[null,t('sleepOff')],[5],[10],[15],[20],[30],[45],[60,t('hour')],['section',t('sleepSection')]];
@@ -136,8 +140,13 @@ function openSleepDialog(){
  $('sleepDialog').showModal();
 }
 $('sleepButton').onclick=openSleepDialog;
-audio.addEventListener('play',()=>{sleep.last=performance.now();if(!state.book||!readLocal('sp.phone.sleepRewind:'+state.book.id,false))return;try{localStorage.removeItem('sp.phone.sleepRewind:'+state.book.id);}catch{}
- if(state.pending!==null)state.pending=Math.max(0,state.pending-REWIND);else audio.currentTime=Math.max(0,audio.currentTime-REWIND);});
+audio.addEventListener('play',()=>{
+ if(sleep.mode==='time'&&sleepLeft()<=0)setSleep(null);
+ if(!state.book)return;const key='sp.phone.sleepRewind:'+state.book.id,value=readLocal(key,0);if(!value)return;
+ try{localStorage.removeItem(key);}catch{}
+ const back=value===true?60:Math.max(0,Number(value)||0);
+ if(state.pending!==null)state.pending=Math.max(0,state.pending-back);else audio.currentTime=Math.max(0,audio.currentTime-back);
+});
 audio.addEventListener('pause',()=>{if(sleep.mode)audio.volume=1;});
 async function togglePlay(){if(!state.book)return;try{if(audio.paused)await audio.play();else audio.pause();}catch{$('playerStatus').textContent=t('playFailed');}}
 let frame;
