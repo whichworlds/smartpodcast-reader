@@ -21,32 +21,47 @@
  function wordAt(words,time){let lo=0,hi=words.length;while(lo<hi){const m=(lo+hi)>>>1;if(words[m].start<=time)lo=m+1;else hi=m;}return lo-1;}
  function remaining(duration,position,rate){return Math.ceil(Math.max(0,duration-position)/(rate>0?rate:1));}
  function clock(seconds){seconds=Math.max(0,Math.floor(seconds||0));const m=Math.floor(seconds/60);return (m>=60?Math.floor(m/60)+':'+String(m%60).padStart(2,'0'):String(m).padStart(2,'0'))+':'+String(seconds%60).padStart(2,'0');}
- async function readPackage(file){
+ // Stored (uncompressed) ZIP only: every entry is a byte range of the file, read as a Blob slice.
+ async function readZip(file,maxEntries){
   if(file.size<22||file.size>2*1024**3)throw Error('Boş veya çok büyük paket. Kesitleri ayrı aktar.');
   const tail=new DataView(await file.slice(Math.max(0,file.size-65557)).arrayBuffer());let end=-1;
   for(let i=tail.byteLength-22;i>=0;i--)if(tail.getUint32(i,true)===0x06054b50&&i+22+tail.getUint16(i+20,true)===tail.byteLength){end=i;break;}
   if(end<0||tail.getUint16(end+4,true)||tail.getUint16(end+6,true))throw Error('Paket okunamadı. Bilgisayardan Telefon için indir seçeneğiyle yeniden hazırla.');
   const count=tail.getUint16(end+10,true),size=tail.getUint32(end+12,true),offset=tail.getUint32(end+16,true);
-  if(count!==2||size>65536||offset+size>file.size-22)throw Error('Paket yapısı geçersiz.');
-  const directory=new DataView(await file.slice(offset,offset+size).arrayBuffer()),entries=new Map();let cursor=0;
+  if(!count||count>maxEntries||size>1024**2||offset+size>file.size-22)throw Error('Paket yapısı geçersiz.');
+  const directory=new DataView(await file.slice(offset,offset+size).arrayBuffer()),entries=[],names=new Set();let cursor=0;
   for(let i=0;i<count;i++){
    if(cursor+46>size||directory.getUint32(cursor,true)!==0x02014b50)throw Error('Paket dizini bozuk.');
    const flags=directory.getUint16(cursor+8,true),method=directory.getUint16(cursor+10,true),compressed=directory.getUint32(cursor+20,true),length=directory.getUint32(cursor+24,true),nameLength=directory.getUint16(cursor+28,true),extra=directory.getUint16(cursor+30,true),comment=directory.getUint16(cursor+32,true),local=directory.getUint32(cursor+42,true);
    if(cursor+46+nameLength+extra+comment>size)throw Error('Paket dizini eksik.');
    const name=new TextDecoder().decode(new Uint8Array(directory.buffer,cursor+46,nameLength));
-   if(!['book.json','audio.mp3'].includes(name)||entries.has(name)||flags&1||method!==0||compressed!==length||local+30>offset)throw Error('Desteklenmeyen paket. Telefon için indir seçeneğini kullan.');
+   if(names.has(name)||flags&1||method!==0||compressed!==length||local+30>offset)throw Error('Desteklenmeyen paket. Telefon için indir seçeneğini kullan.');
    const header=new DataView(await file.slice(local,local+30).arrayBuffer());
    if(header.getUint32(0,true)!==0x04034b50||header.getUint16(8,true)!==0)throw Error('Paket dosyası bozuk.');
    const dataStart=local+30+header.getUint16(26,true)+header.getUint16(28,true);
    if(dataStart+length>offset)throw Error('Paket yarım aktarılmış.');
-   entries.set(name,file.slice(dataStart,dataStart+length,name==='audio.mp3'?'audio/mpeg':'application/json'));
+   names.add(name);entries.push({name,start:dataStart,length});
    cursor+=46+nameLength+extra+comment;
+  }
+  return entries;
+ }
+ async function readPackage(file){
+  const entries=new Map();
+  for(const entry of await readZip(file,2)){
+   if(!['book.json','audio.mp3'].includes(entry.name))throw Error('Desteklenmeyen paket. Telefon için indir seçeneğini kullan.');
+   entries.set(entry.name,file.slice(entry.start,entry.start+entry.length,entry.name==='audio.mp3'?'audio/mpeg':'application/json'));
   }
   if(!entries.has('book.json')||!entries.has('audio.mp3')||entries.get('book.json').size>20*1024**2)throw Error('Paket içeriği eksik veya çok büyük.');
   const book=validateBook(JSON.parse(await entries.get('book.json').text())),audio=entries.get('audio.mp3');
   if(!audio.size||book.audio!=='audio.mp3'||book.audio_bytes!==audio.size)throw Error('MP3 eksik. Paketi yeniden aktar.');
   return {book,audio};
  }
- root.PhoneReader={validateBook,indexWords,wordAt,remaining,clock,readPackage};
+ // A bundle from "Telefon için toplu indir" holds whole .smartpodcast packages; a single package holds book.json + audio.mp3.
+ async function packagesIn(file){
+  const entries=await readZip(file,500);
+  if(entries.every(entry=>/\.smartpodcast$/i.test(entry.name)))return entries.map(entry=>({name:entry.name.replace(/^\d+-/,''),file:file.slice(entry.start,entry.start+entry.length)}));
+  return [{name:file.name,file}];
+ }
+ root.PhoneReader={validateBook,indexWords,wordAt,remaining,clock,readZip,readPackage,packagesIn};
  if(typeof module!=='undefined')module.exports=root.PhoneReader;
 })(globalThis);

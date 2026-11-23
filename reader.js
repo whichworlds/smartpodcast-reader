@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='2026.11.23-6';
+const APP_VERSION='2026.11.23-7';
 const $=id=>document.getElementById(id),audio=$('audio'),P=PhoneReader,L=I18n,t=L.t;
 const state={offline:'offlinePreparing',book:null,words:[],index:-2,url:null,request:0,paragraph:false,section:-1,pending:null,wake:null,wakeRequest:0,lastSave:0};
 function readLocal(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}}
@@ -163,11 +163,26 @@ $('back').onclick=()=>{setSleep(null);setFocus(false);leaveFullscreen();++state.
 $('packages').onchange=async()=>{
  const files=[...$('packages').files];$('packages').disabled=true;
  try{
-  for(const file of files){$('importStatus').textContent=t('adding')+file.name;const {book,audio:blob}=await P.readPackage(file),old=await dbRead('books',book.id);
-   if(old?.revision===book.revision){$('importStatus').textContent=t('already');continue;}
-   if(old&&!confirm(book.title+'\n'+t('newVersion')))continue;
-   await dbWrite(book,blob);if(old)try{localStorage.removeItem('sp.phone.position:'+book.id);}catch{}$('importStatus').textContent=t('added')+book.title;
-  }await renderLibrary();if(navigator.storage?.persist)await navigator.storage.persist().catch(()=>false);
+  const count={added:0,same:0,failed:0};let lastError=null,single=true;
+  for(const file of files){
+   $('importStatus').textContent=t('adding')+file.name;
+   let items;try{items=await P.packagesIn(file);}catch(error){count.failed++;lastError=error;continue;}
+   if(items.length>1||files.length>1)single=false;
+   for(const [index,item] of items.entries()){
+    try{
+     $('importStatus').textContent=t('adding')+(items.length>1?(index+1)+'/'+items.length+' · ':'')+item.name;
+     const {book,audio:blob}=await P.readPackage(item.file),old=await dbRead('books',book.id);
+     if(old?.revision===book.revision){count.same++;continue;}
+     if(old&&!confirm(book.title+'\n'+t('newVersion')))continue;
+     await dbWrite(book,blob);if(old)try{localStorage.removeItem('sp.phone.position:'+book.id);}catch{}count.added++;
+     if(single)$('importStatus').textContent=t('added')+book.title;
+    }catch(error){if(error?.name==='QuotaExceededError')throw error;count.failed++;lastError=error;}
+   }
+  }
+  if(single&&count.same&&!count.added)$('importStatus').textContent=t('already');
+  else if(single&&lastError&&!count.added)message(lastError);
+  else if(!single)$('importStatus').textContent=t('importSummary').replace('{added}',count.added).replace('{same}',count.same).replace('{failed}',count.failed)+(lastError?' · '+L.translateError(lastError.message||String(lastError)):'');
+  await renderLibrary();if(navigator.storage?.persist)await navigator.storage.persist().catch(()=>false);
  }catch(error){message(error);await renderLibrary().catch(()=>{});}finally{$('packages').disabled=false;$('packages').value='';}
 };
 function saveSettings(){writeLocal('sp.phone.settings',settings);applySettings();}
