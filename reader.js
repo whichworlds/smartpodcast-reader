@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='2026.11.23-11';
+const APP_VERSION='2026.11.23-12';
 const $=id=>document.getElementById(id),audio=$('audio'),P=PhoneReader,L=I18n,t=L.t;
 const state={offline:'offlinePreparing',book:null,words:[],index:-2,url:null,request:0,paragraph:false,section:-1,pending:null,wake:null,wakeRequest:0,lastSave:0};
 function readLocal(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}}
@@ -125,16 +125,24 @@ function update(){
  if(!state.book)return;const time=state.pending??audio.currentTime,at=P.wordAt(state.words,time),word=state.words[at],sectionIndex=word?.sectionIndex??0;
  if(at!==state.index){state.index=at;$('word').textContent=word?.word||state.words[0]?.word||t('ready');fitWord();}
  $('chapterTitle').textContent=state.book.sections[sectionIndex].label;
- if(state.paragraph){if(state.section!==sectionIndex)renderParagraph(sectionIndex);const old=$('paragraph').querySelector('.active'),active=$('paragraph').querySelector(`[data-word="${word?.wordIndex}"]`);if(old!==active){old?.classList.remove('active');active?.classList.add('active');}}
+ if(state.paragraph){if(state.section!==sectionIndex)renderParagraph(sectionIndex);const old=$('paragraph').querySelector('.active'),active=$('paragraph').querySelector(`[data-word="${word?.wordIndex}"]`);if(old!==active){old?.classList.remove('active');active?.classList.add('active');followWord(active,!old);}}
  if(document.activeElement!==$('seek'))$('seek').value=time;
  const rate=audio.playbackRate||settings.rate;$('seek').setAttribute('aria-valuetext',P.clock(time/rate)+' / '+P.clock(state.book.duration/rate));$('elapsed').textContent=P.clock(time/rate);$('remaining').textContent=t('remaining')+P.clock(P.remaining(state.book.duration,time,rate));
  tickSleep(word?.sectionIndex);$('focusProgress').firstChild.style.width=Math.min(100,100*time/state.book.duration)+'%';$('play').textContent=audio.paused?'▶':'Ⅱ';$('play').setAttribute('aria-label',t(audio.paused?'play':'pause'));savePosition();
 }
 function renderParagraph(index){
  state.section=index;$('sectionPicker').value=index;const section=state.book.sections[index],points=Array.from(section.text);let cursor=0;const content=document.createDocumentFragment();
- for(const [i,word] of section.words.entries()){content.append(document.createTextNode(points.slice(cursor,word.char_start).join('')));const token=node('button',word.word);token.dataset.word=i;token.onclick=()=>seek(word.start);content.append(token);cursor=word.char_end;}
+ for(const [i,word] of section.words.entries()){content.append(document.createTextNode(points.slice(cursor,word.char_start).join('')));const token=node('button',word.word);token.dataset.word=i;token.onclick=()=>{state.userScroll=0;seek(word.start);};content.append(token);cursor=word.char_end;}
  content.append(document.createTextNode(points.slice(cursor).join('')));$('paragraph').replaceChildren(content);$('paragraphPanel').scrollTop=0;
 }
+// Keep the spoken word in the upper third of the paragraph; a hand scroll pauses following for 4 s.
+function followWord(active,instant){
+ const panel=$('paragraphPanel');if(!active||panel.hidden||Date.now()-(state.userScroll||0)<4000)return;
+ const box=panel.getBoundingClientRect(),word=active.getBoundingClientRect();
+ if(instant||word.top<box.top+box.height*.12||word.bottom>box.top+box.height*.62)
+  panel.scrollTo({top:panel.scrollTop+word.top-box.top-box.height*.3,behavior:instant?'auto':'smooth'});
+}
+for(const type of ['touchstart','wheel','pointerdown'])$('paragraphPanel').addEventListener(type,event=>{if(!event.target.closest('#paragraph button'))state.userScroll=Date.now();},{passive:true});
 function seek(time){if(!state.book)return;const position=Math.max(0,Math.min(state.book.duration,time));if(state.pending!==null)state.pending=position;else audio.currentTime=position;update();savePosition(true);}
 // Focus mode: only the word stays; faint transport and a hairline progress remain.
 const focus={on:false,timer:0,reveal:0};
