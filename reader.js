@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='2026.11.23-8';
+const APP_VERSION='2026.11.23-9';
 const $=id=>document.getElementById(id),audio=$('audio'),P=PhoneReader,L=I18n,t=L.t;
 const state={offline:'offlinePreparing',book:null,words:[],index:-2,url:null,request:0,paragraph:false,section:-1,pending:null,wake:null,wakeRequest:0,lastSave:0};
 function readLocal(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}}
@@ -49,30 +49,58 @@ async function renderLibrary(){
   tree.append(list);$('books').append(tree);
  }
 }
-// Hold the number and drag: pointer events, because Android Chrome has no HTML drag and drop.
+// Reorder by long-pressing a card (or touching its number) and dragging. The card follows the
+// finger, neighbours slide aside and numbers update live. Pointer events, because Android
+// Chrome has no HTML drag and drop; a long press keeps normal scrolling possible.
+const reorder={item:null,suppressClick:0};
+document.addEventListener('touchmove',event=>{if(reorder.item)event.preventDefault();},{passive:false});
+document.addEventListener('click',event=>{if(Date.now()<reorder.suppressClick&&event.target.closest('#books')){event.preventDefault();event.stopPropagation();}},true);
+function renumber(){[...$('books').children].forEach((el,index)=>{const badge=el.querySelector('.order-handle');if(badge)badge.textContent=String(index+1);});}
 function orderHandle(item,key,number){
  const handle=node('span',String(number+1),'order-handle');item.dataset.orderKey=key;
- handle.setAttribute('role','button');handle.setAttribute('aria-label',t('dragHint'));handle.title=t('dragHint');
- handle.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();});
- handle.addEventListener('pointerdown',event=>{
-  if(event.button>0)return;event.preventDefault();event.stopPropagation();
-  const list=$('books');let moved=false,frame=0,lastY=event.clientY;
-  try{handle.setPointerCapture(event.pointerId);}catch{}
-  item.classList.add('dragging');navigator.vibrate?.(12);
-  const place=y=>{const others=[...list.children].filter(el=>el!==item&&el.dataset.orderKey);
-   const next=others.find(el=>{const r=el.getBoundingClientRect();return y<r.top+r.height/2;});
-   if(next){if(item.nextElementSibling!==next){list.insertBefore(item,next);moved=true;}}else if(list.lastElementChild!==item){list.append(item);moved=true;}};
-  const scroll=()=>{const edge=70;if(lastY<edge)scrollBy(0,-12);else if(lastY>innerHeight-edge)scrollBy(0,12);place(lastY);frame=requestAnimationFrame(scroll);};
-  frame=requestAnimationFrame(scroll);
-  const move=e=>{lastY=e.clientY;place(lastY);};
-  const end=()=>{cancelAnimationFrame(frame);handle.removeEventListener('pointermove',move);handle.removeEventListener('pointerup',end);handle.removeEventListener('pointercancel',end);
-   item.classList.remove('dragging');
-   const order=[...list.children].map(el=>el.dataset.orderKey).filter(Boolean);
-   order.forEach((_,index)=>{const badge=list.children[index]?.querySelector('.order-handle');if(badge)badge.textContent=String(index+1);});
-   if(moved)writeLocal('sp.phone.order',order);};
-  handle.addEventListener('pointermove',move);handle.addEventListener('pointerup',end);handle.addEventListener('pointercancel',end);
+ handle.setAttribute('aria-hidden','true');item.title=t('dragHint');
+ item.addEventListener('contextmenu',event=>event.preventDefault());
+ item.addEventListener('pointerdown',event=>{
+  if(event.button>0||reorder.item)return;
+  const now=event.target.closest('.order-handle')===handle,startX=event.clientX,startY=event.clientY;
+  if(now)event.preventDefault();
+  let timer=0;
+  const cancel=()=>{clearTimeout(timer);item.removeEventListener('pointermove',early);item.removeEventListener('pointerup',cancel);item.removeEventListener('pointercancel',cancel);};
+  const early=e=>{if(Math.hypot(e.clientX-startX,e.clientY-startY)>8)cancel();};
+  const begin=()=>{cancel();startDrag(item,event.pointerId,startY);};
+  if(now)begin();else{timer=setTimeout(begin,380);item.addEventListener('pointermove',early);item.addEventListener('pointerup',cancel);item.addEventListener('pointercancel',cancel);}
  });
  return handle;
+}
+function startDrag(item,pointerId,startY){
+ const list=$('books');reorder.item=item;
+ try{item.setPointerCapture(pointerId);}catch{}
+ navigator.vibrate?.(15);
+ const grab=startY-item.getBoundingClientRect().top;let y=startY,frame=0;
+ item.classList.add('dragging');document.body.classList.add('reordering');
+ const slide=(el,from)=>{const to=el.getBoundingClientRect().top;if(from!==to)el.animate([{transform:`translateY(${from-to}px)`},{transform:'none'}],{duration:160,easing:'ease-out'});};
+ const follow=()=>{
+  item.style.transform='';const base=item.getBoundingClientRect(),top=y-grab,center=top+base.height/2;
+  let moved=false;
+  for(;;){
+   const prev=item.previousElementSibling,next=item.nextElementSibling;
+   if(prev?.dataset.orderKey){const r=prev.getBoundingClientRect();if(center<r.top+r.height/2){const from=r.top;list.insertBefore(item,prev);slide(prev,from);moved=true;continue;}}
+   if(next?.dataset.orderKey){const r=next.getBoundingClientRect();if(center>r.top+r.height/2){const from=r.top;list.insertBefore(next,item);slide(next,from);moved=true;continue;}}
+   break;
+  }
+  if(moved){renumber();navigator.vibrate?.(6);}
+  item.style.transform=`translateY(${top-item.getBoundingClientRect().top}px)`;
+ };
+ const tick=()=>{const edge=90;if(y<edge)scrollBy(0,-Math.ceil((edge-y)/6));else if(y>innerHeight-edge)scrollBy(0,Math.ceil((y-innerHeight+edge)/6));follow();frame=requestAnimationFrame(tick);};
+ const move=e=>{y=e.clientY;};
+ const end=()=>{
+  cancelAnimationFrame(frame);item.removeEventListener('pointermove',move);item.removeEventListener('pointerup',end);item.removeEventListener('pointercancel',end);
+  const offset=item.getBoundingClientRect().top;item.style.transform='';slide(item,offset);
+  item.classList.remove('dragging');document.body.classList.remove('reordering');reorder.item=null;reorder.suppressClick=Date.now()+400;
+  renumber();writeLocal('sp.phone.order',[...list.children].map(el=>el.dataset.orderKey).filter(Boolean));
+ };
+ item.addEventListener('pointermove',move);item.addEventListener('pointerup',end);item.addEventListener('pointercancel',end);
+ follow();frame=requestAnimationFrame(tick);
 }
 function savePosition(force=false){
  if(!state.book||state.pending!==null||(!force&&Date.now()-state.lastSave<2000))return;
