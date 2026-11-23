@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='2026.11.23-4';
+const APP_VERSION='2026.11.23-5';
 const $=id=>document.getElementById(id),audio=$('audio'),P=PhoneReader,L=I18n,t=L.t;
 const state={offline:'offlinePreparing',book:null,words:[],index:-2,url:null,request:0,paragraph:false,section:-1,pending:null,wake:null,wakeRequest:0,lastSave:0};
 function readLocal(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}}
@@ -51,7 +51,7 @@ function savePosition(force=false){
  state.lastSave=Date.now();if(!writeLocal('sp.phone.position:'+state.book.id,{revision:state.book.revision,position:Math.max(0,Math.min(state.book.duration,audio.currentTime||0))}))$('playerStatus').textContent=t('positionFailed');
 }
 async function openBook(id,autoplay=false){
- setFocus(false);const request=++state.request;savePosition(true);audio.pause();
+ setSleep(null);setFocus(false);const request=++state.request;savePosition(true);audio.pause();
  const [book,track]=await Promise.all([dbRead('books',id),dbRead('audio',id)]);if(request!==state.request)return;
  if(!book||!track?.blob)throw Error('Kitap bulunamadı. Paketi yeniden ekle.');
  audio.removeAttribute('src');audio.load();if(state.url)URL.revokeObjectURL(state.url);
@@ -73,7 +73,7 @@ function update(){
  if(state.paragraph){if(state.section!==sectionIndex)renderParagraph(sectionIndex);const old=$('paragraph').querySelector('.active'),active=$('paragraph').querySelector(`[data-word="${word?.wordIndex}"]`);if(old!==active){old?.classList.remove('active');active?.classList.add('active');}}
  if(document.activeElement!==$('seek'))$('seek').value=time;
  const rate=audio.playbackRate||settings.rate;$('seek').setAttribute('aria-valuetext',P.clock(time/rate)+' / '+P.clock(state.book.duration/rate));$('elapsed').textContent=P.clock(time/rate);$('remaining').textContent=t('remaining')+P.clock(P.remaining(state.book.duration,time,rate));
- $('focusProgress').firstChild.style.width=Math.min(100,100*time/state.book.duration)+'%';$('play').textContent=audio.paused?'▶':'Ⅱ';$('play').setAttribute('aria-label',t(audio.paused?'play':'pause'));savePosition();
+ tickSleep(word?.sectionIndex);$('focusProgress').firstChild.style.width=Math.min(100,100*time/state.book.duration)+'%';$('play').textContent=audio.paused?'▶':'Ⅱ';$('play').setAttribute('aria-label',t(audio.paused?'play':'pause'));savePosition();
 }
 function renderParagraph(index){
  state.section=index;$('sectionPicker').value=index;const section=state.book.sections[index],points=Array.from(section.text);let cursor=0;const content=document.createDocumentFragment();
@@ -83,7 +83,7 @@ function renderParagraph(index){
 function seek(time){if(!state.book)return;const position=Math.max(0,Math.min(state.book.duration,time));if(state.pending!==null)state.pending=position;else audio.currentTime=position;update();savePosition(true);}
 // Focus mode: only the word stays; faint transport and a hairline progress remain.
 const focus={on:false,timer:0,reveal:0};
-function canFocus(){return !!state.book&&!state.paragraph&&!audio.paused&&!$('reader').hidden&&!$('settings').open;}
+function canFocus(){return !!state.book&&!state.paragraph&&!audio.paused&&!$('reader').hidden&&!$('settings').open&&!$('sleepDialog').open;}
 function scheduleFocus(){clearTimeout(focus.timer);if(!focus.on&&canFocus())focus.timer=setTimeout(()=>{if(canFocus())setFocus(true);},4000);}
 // The installed app has no address bar; asking for fullscreen there only adds Chrome's exit notice.
 function installedApp(){return ['standalone','fullscreen','minimal-ui'].some(mode=>matchMedia(`(display-mode: ${mode})`).matches);}
@@ -104,6 +104,41 @@ $('reader').addEventListener('input',scheduleFocus,true);
 window.addEventListener('popstate',()=>{if(focus.on){focus.on=false;$('reader').classList.remove('focus','reveal');scheduleFocus();}});
 document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&focus.on)setFocus(false);});
 audio.addEventListener('play',scheduleFocus);audio.addEventListener('pause',()=>clearTimeout(focus.timer));
+// Sleep timer: counts real listening time, fades out over the last 30 s, then pauses.
+// The next play of that book starts one minute earlier, since the end was likely missed.
+const FADE=30000,REWIND=60;
+const sleep={mode:null,left:0,last:0,section:-1};
+function sleepLabel(){if(!sleep.mode)return '';return sleep.mode==='section'?t('sleepEnd'):P.clock(Math.ceil(sleep.left/1000));}
+function renderSleep(){const label=sleepLabel();$('sleepButton').textContent=label?'☾ '+label:'☾';$('sleepButton').classList.toggle('active',!!sleep.mode);$('sleepBadge').textContent=label?'☾ '+label:'';}
+function setSleep(mode){
+ sleep.mode=mode;sleep.last=performance.now();audio.volume=1;
+ if(typeof mode==='number'){sleep.left=mode*60000;sleep.mode='time';settings.sleep=mode;saveSettings();}
+ if(mode==='section'){sleep.section=state.words[Math.max(0,P.wordAt(state.words,audio.currentTime))]?.sectionIndex??0;settings.sleep='section';saveSettings();}
+ renderSleep();syncWake();
+}
+function sleepStop(){
+ const id=state.book?.id;setSleep(null);audio.pause();audio.volume=1;
+ if(id)writeLocal('sp.phone.sleepRewind:'+id,true);
+}
+function tickSleep(sectionIndex){
+ const now=performance.now(),elapsed=now-sleep.last;sleep.last=now;
+ if(!sleep.mode||audio.paused)return;
+ if(sleep.mode==='section'){if(sectionIndex>sleep.section)sleepStop();else if(sectionIndex<sleep.section)sleep.section=sectionIndex;return;}
+ sleep.left-=Math.min(elapsed,15000);
+ if(sleep.left<=0){sleepStop();return;}
+ audio.volume=Math.max(0,Math.min(1,sleep.left/FADE));renderSleep();
+}
+function openSleepDialog(){
+ const options=[[null,t('sleepOff')],[5],[10],[15],[20],[30],[45],[60,t('hour')],['section',t('sleepSection')]];
+ $('sleepOptions').replaceChildren(...options.map(([value,label])=>{const b=node('button',label||value+' '+t('min'),'sleep-option');b.type='button';
+  const current=sleep.mode==='section'?'section':sleep.mode?settings.sleep:null;if(value===current)b.classList.add('active');
+  b.onclick=()=>{setSleep(value);$('sleepDialog').close();};return b;}));
+ $('sleepDialog').showModal();
+}
+$('sleepButton').onclick=openSleepDialog;
+audio.addEventListener('play',()=>{sleep.last=performance.now();if(!state.book||!readLocal('sp.phone.sleepRewind:'+state.book.id,false))return;try{localStorage.removeItem('sp.phone.sleepRewind:'+state.book.id);}catch{}
+ if(state.pending!==null)state.pending=Math.max(0,state.pending-REWIND);else audio.currentTime=Math.max(0,audio.currentTime-REWIND);});
+audio.addEventListener('pause',()=>{if(sleep.mode)audio.volume=1;});
 async function togglePlay(){if(!state.book)return;try{if(audio.paused)await audio.play();else audio.pause();}catch{$('playerStatus').textContent=t('playFailed');}}
 let frame;
 function animate(){update();if(!audio.paused)frame=requestAnimationFrame(animate);}
@@ -115,7 +150,7 @@ function applyStep(){const n=String(settings.step);for(const id of ['stepBack','
 $('rate').onchange=()=>{settings.rate=Number($('rate').value);audio.playbackRate=settings.rate;audio.preservesPitch=true;saveSettings();update();};
 $('sectionPicker').onchange=()=>{const index=Number($('sectionPicker').value);seek(state.book.sections[index].start);renderParagraph(index);};
 $('paragraphToggle').onclick=()=>{state.paragraph=!state.paragraph;$('paragraphPanel').hidden=!state.paragraph;$('wordStage').hidden=state.paragraph;$('paragraphToggle').textContent=t(state.paragraph?'singleWord':'showParagraph');state.section=-1;update();fitWord();};
-$('back').onclick=()=>{setFocus(false);leaveFullscreen();++state.request;savePosition(true);audio.pause();state.book=null;audio.removeAttribute('src');audio.load();if(state.url)URL.revokeObjectURL(state.url);state.url=null;$('reader').hidden=true;$('library').hidden=false;document.title=t('title');syncWake();renderLibrary().catch(message);};
+$('back').onclick=()=>{setSleep(null);setFocus(false);leaveFullscreen();++state.request;savePosition(true);audio.pause();state.book=null;audio.removeAttribute('src');audio.load();if(state.url)URL.revokeObjectURL(state.url);state.url=null;$('reader').hidden=true;$('library').hidden=false;document.title=t('title');syncWake();renderLibrary().catch(message);};
 $('packages').onchange=async()=>{
  const files=[...$('packages').files];$('packages').disabled=true;
  try{
@@ -129,12 +164,12 @@ $('packages').onchange=async()=>{
 function saveSettings(){writeLocal('sp.phone.settings',settings);applySettings();}
 function applySettings(){applyStep();document.body.classList.toggle('paper',settings.theme==='paper');$('rate').value=settings.rate;document.documentElement.style.setProperty('--font',settings.font+'px');document.documentElement.style.setProperty('--brightness',Math.max(.45,Math.min(1,(settings.brightness||100)/100)));$('fontSize').value=settings.font;$('theme').value=settings.theme==='paper'?'paper':'dark';$('keepAwake').checked=!!settings.awake;$('brightness').value=settings.brightness||100;fitWord();syncWake();}
 $('settingsButton').onclick=()=>$('settings').showModal();$('fontSize').oninput=()=>{settings.font=Number($('fontSize').value);saveSettings();};$('theme').onchange=()=>{settings.theme=$('theme').value;saveSettings();};$('keepAwake').onchange=()=>{settings.awake=$('keepAwake').checked;saveSettings();};$('brightness').oninput=()=>{settings.brightness=Number($('brightness').value);saveSettings();};
-async function syncWake(){const version=++state.wakeRequest,wanted=!!state.book&&settings.awake&&document.visibilityState==='visible';if(!wanted){await state.wake?.release().catch(()=>{});state.wake=null;return;}if(state.wake&&!state.wake.released)return;try{const lock=await navigator.wakeLock?.request('screen');if(version!==state.wakeRequest){await lock?.release();return;}state.wake=lock;}catch{}}
+async function syncWake(){const version=++state.wakeRequest,wanted=!!state.book&&settings.awake&&!sleep.mode&&document.visibilityState==='visible';if(!wanted){await state.wake?.release().catch(()=>{});state.wake=null;return;}if(state.wake&&!state.wake.released)return;try{const lock=await navigator.wakeLock?.request('screen');if(version!==state.wakeRequest){await lock?.release();return;}state.wake=lock;}catch{}}
 document.addEventListener('visibilitychange',()=>{savePosition(true);syncWake();if(document.visibilityState==='visible')update();});window.addEventListener('pagehide',()=>savePosition(true));window.addEventListener('resize',fitWord);
 if('mediaSession' in navigator)for(const [action,handler] of Object.entries({play:()=>audio.play().catch(()=>{}),pause:()=>audio.pause(),seekbackward:()=>seek(audio.currentTime-10),seekforward:()=>seek(audio.currentTime+10),seekto:d=>seek(d.seekTime)})){try{navigator.mediaSession.setActionHandler(action,handler);}catch{}}
 let installPrompt;window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();installPrompt=event;$('install').hidden=false;});$('install').onclick=async()=>{if(installPrompt){await installPrompt.prompt();installPrompt=null;$('install').hidden=true;}else $('helpDialog').showModal();};$('help').onclick=()=>$('helpDialog').showModal();window.addEventListener('appinstalled',()=>{$('install').hidden=true;});
 function setOffline(key){state.offline=key;$('offlineStatus').textContent=t(key);}
-function applyLanguage(){L.applyStatic();applyStep();$('languageSelect').value=L.language;$('offlineStatus').textContent=t(state.offline);document.title=state.book?state.book.source_title+t('appSuffix'):t('title');$('paragraphToggle').textContent=t(state.paragraph?'singleWord':'showParagraph');if(state.book){state.index=-2;update();}else $('word').textContent=t('ready');}
+function applyLanguage(){L.applyStatic();applyStep();if(typeof renderSleep==='function')renderSleep();$('languageSelect').value=L.language;$('offlineStatus').textContent=t(state.offline);document.title=state.book?state.book.source_title+t('appSuffix'):t('title');$('paragraphToggle').textContent=t(state.paragraph?'singleWord':'showParagraph');if(state.book){state.index=-2;update();}else $('word').textContent=t('ready');}
 function changeLanguage(value){L.setLanguage(value);applyLanguage();renderLibrary().catch(message);}
 $('language').onclick=()=>changeLanguage(L.language==='de'?'tr':'de');$('languageSelect').onchange=()=>changeLanguage($('languageSelect').value);
 async function offlineSetup(){if(!('serviceWorker' in navigator)||!window.isSecureContext){setOffline('offlineHttps');return;}try{await navigator.serviceWorker.register('sw.js');await navigator.serviceWorker.ready;setOffline('offlineReady');}catch{setOffline('offlineFailed');}}

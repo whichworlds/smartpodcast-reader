@@ -28,3 +28,12 @@ body{-webkit-tap-highlight-color:transparent}
 .reader.focus .focus-progress{opacity:.25}
 .word-stage{cursor:pointer}
 .app-version{display:block;margin-top:6px;font-size:10px;opacity:.6}
+.reader-bottom{gap:8px}
+.sleep-button{margin-left:auto;background:none;border:1px solid var(--line);color:var(--muted);border-radius:99px;min-height:38px;padding:0 12px;font-size:13px;font-variant-numeric:tabular-nums}
+.sleep-button.active{color:var(--accent);border-color:var(--accent)}
+.sleep-options{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.sleep-option{background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:12px;min-height:46px;font-size:13px}
+.sleep-option.active{background:var(--accent);color:#1a281c;border-color:var(--accent)}
+.sleep-badge{position:absolute;left:0;right:0;bottom:12px;margin:0;text-align:center;font-size:11px;color:var(--muted);opacity:0;pointer-events:none;transition:opacity .6s;font-variant-numeric:tabular-nums}
+.reader.focus .sleep-badge{opacity:.35}
+.reader{position:relative}
