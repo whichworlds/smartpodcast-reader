@@ -17,6 +17,16 @@
   }
   return book;
  }
+ function sequenceInfo(book){
+  const s=book.sequence;
+  if(s&&typeof s.id==='string'&&s.id&&Number.isInteger(s.index)&&Number.isInteger(s.total)&&s.index>0&&s.index<=s.total)return s;
+  const legacy=/^(.*)-telegram-(\d+)$/.exec(book.id||'');
+  return legacy&&Number(legacy[2])>0?{id:legacy[1],index:Number(legacy[2]),total:null}:null;
+ }
+ function nextSequenceBook(books,current){
+  const seq=sequenceInfo(current);if(!seq||seq.total&&seq.index>=seq.total)return null;
+  return books.find(book=>{const next=sequenceInfo(book);return book.source_id===current.source_id&&book.language===current.language&&next?.id===seq.id&&next.index===seq.index+1;})||null;
+ }
  function indexWords(book){return book.sections.flatMap((section,sectionIndex)=>section.words.map((word,wordIndex)=>({...word,sectionIndex,wordIndex})));}
  function wordAt(words,time){let lo=0,hi=words.length;while(lo<hi){const m=(lo+hi)>>>1;if(words[m].start<=time)lo=m+1;else hi=m;}return lo-1;}
  function remaining(duration,position,rate){return Math.ceil(Math.max(0,duration-position)/(rate>0?rate:1));}
@@ -62,6 +72,6 @@
   if(entries.every(entry=>/\.smartpodcast$/i.test(entry.name)))return entries.map(entry=>({name:entry.name.replace(/^\d+-/,''),file:file.slice(entry.start,entry.start+entry.length)}));
   return [{name:file.name,file}];
  }
- root.PhoneReader={validateBook,indexWords,wordAt,remaining,clock,readZip,readPackage,packagesIn};
+ root.PhoneReader={validateBook,sequenceInfo,nextSequenceBook,indexWords,wordAt,remaining,clock,readZip,readPackage,packagesIn};
  if(typeof module!=='undefined')module.exports=root.PhoneReader;
 })(globalThis);

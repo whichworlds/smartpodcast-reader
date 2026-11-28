@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION='2026.11.23-12';
+const APP_VERSION='2026.11.28-13';
 const $=id=>document.getElementById(id),audio=$('audio'),P=PhoneReader,L=I18n,t=L.t;
 const state={offline:'offlinePreparing',book:null,words:[],index:-2,url:null,request:0,paragraph:false,section:-1,pending:null,wake:null,wakeRequest:0,lastSave:0};
 function readLocal(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}}
@@ -45,7 +45,7 @@ async function renderLibrary(){
   const text=node('span',undefined,'tree-text');text.append(node('strong',group[0].source_title),node('small',`${group.length} ${t('slices')} · ${group[0].language.toUpperCase()} · ${P.clock(left)}${t('left')}`));
    summary.append(orderHandle(tree,key,number),node('span','›','tree-chevron'),text);tree.append(summary);
   tree.addEventListener('toggle',()=>{const state=readLocal('sp.phone.expanded',{});state[key]=tree.open;writeLocal('sp.phone.expanded',state);});
-  const list=node('div',undefined,'tree-items');for(const [index,book] of group.entries())list.append(bookRow(book,`${t('slice')}${index+1} · ${range(book)}`));
+  const list=node('div',undefined,'tree-items');for(const [index,book] of group.entries()){const seq=P.sequenceInfo(book);list.append(bookRow(book,`${t('slice')}${seq?seq.index:index+1}${seq?.total?'/'+seq.total:''} · ${range(book)}`));}
   tree.append(list);$('books').append(tree);
  }
 }
@@ -105,12 +105,12 @@ function savePosition(force=false){
  if(!state.book||state.pending!==null||(!force&&Date.now()-state.lastSave<2000))return;
  state.lastSave=Date.now();if(!writeLocal('sp.phone.position:'+state.book.id,{revision:state.book.revision,position:Math.max(0,Math.min(state.book.duration,audio.currentTime||0))}))$('playerStatus').textContent=t('positionFailed');
 }
-async function openBook(id,autoplay=false){
- setSleep(null);setFocus(false);const request=++state.request;savePosition(true);audio.pause();
+async function openBook(id,autoplay=false,continuation=false){
+ if(!continuation)setSleep(null);setFocus(false);const request=++state.request;savePosition(true);audio.pause();
  const [book,track]=await Promise.all([dbRead('books',id),dbRead('audio',id)]);if(request!==state.request)return;
  if(!book||!track?.blob)throw Error('Kitap bulunamadı. Paketi yeniden ekle.');
  audio.removeAttribute('src');audio.load();if(state.url)URL.revokeObjectURL(state.url);
- state.book=book;state.words=P.indexWords(book);state.index=-2;state.section=-1;state.paragraph=false;state.pending=Math.min(book.duration,bookmark(book)?.position||0);
+ state.book=book;state.words=P.indexWords(book);state.index=-2;state.section=-1;state.paragraph=false;state.pending=continuation?0:Math.min(book.duration,bookmark(book)?.position||0);
  state.url=URL.createObjectURL(track.blob);audio.src=state.url;audio.playbackRate=settings.rate;audio.preservesPitch=true;audio.load();
  $('library').hidden=true;$('reader').hidden=false;$('wordStage').hidden=false;$('paragraphPanel').hidden=true;$('paragraphToggle').textContent=t('showParagraph');$('playerStatus').textContent='';
  $('bookTitle').textContent=book.source_title;$('sliceTitle').textContent=book.source_duration?P.clock(book.source_offset)+'–'+P.clock(book.source_offset+book.source_duration)+' · '+book.language.toUpperCase():book.title;
@@ -215,7 +215,15 @@ async function togglePlay(){if(!state.book)return;try{if(audio.paused)await audi
 let frame;
 function animate(){update();if(!audio.paused)frame=requestAnimationFrame(animate);}
 audio.addEventListener('loadedmetadata',()=>{if(!state.book)return;audio.playbackRate=settings.rate;if(state.pending!==null){audio.currentTime=state.pending;state.pending=null;}update();});
-audio.addEventListener('timeupdate',update);audio.addEventListener('play',()=>{cancelAnimationFrame(frame);animate();syncWake();});audio.addEventListener('pause',()=>{cancelAnimationFrame(frame);update();savePosition(true);syncWake();});audio.addEventListener('ended',()=>{update();savePosition(true);});audio.addEventListener('error',()=>{if(state.book)$('playerStatus').textContent=t('mp3Failed');});
+async function continueAfterEnded(){
+ const stopForSleep=sleep.mode==='section'||sleep.mode==='time'&&sleepLeft()<=0,deadline=sleep.mode==='time'?sleep.deadline:null;
+ update();savePosition(true);const current=state.book,request=state.request;if(!current)return;
+ if(stopForSleep){sleepFinish();return;}
+ const books=await dbRead('books');if(state.request!==request||state.book?.id!==current.id)return;
+ if(deadline&&Date.now()>=deadline){sleepFinish();return;}
+ const next=P.nextSequenceBook(books,current);if(next)await openBook(next.id,true,true);
+}
+audio.addEventListener('timeupdate',update);audio.addEventListener('play',()=>{cancelAnimationFrame(frame);animate();syncWake();});audio.addEventListener('pause',()=>{cancelAnimationFrame(frame);update();savePosition(true);syncWake();});audio.addEventListener('ended',()=>continueAfterEnded().catch(message));audio.addEventListener('error',()=>{if(state.book)$('playerStatus').textContent=t('mp3Failed');});
 $('play').onclick=()=>{if(audio.paused)enterFullscreen();togglePlay();};$('rewind').onclick=()=>seek((state.pending??audio.currentTime)-settings.step);$('forward').onclick=()=>seek((state.pending??audio.currentTime)+settings.step);
 for(const id of ['stepBack','stepForward'])$(id).onclick=()=>{const steps=[5,10,15,30];settings.step=steps[(steps.indexOf(settings.step)+1)%steps.length];saveSettings();};
 function applyStep(){const n=String(settings.step);for(const id of ['stepBack','stepForward']){$(id).textContent=n+' '+t('sec');$(id).setAttribute('aria-label',t('step').replace('{n}',n));}$('rewind').setAttribute('aria-label',t('rewind').replace('{n}',n));$('forward').setAttribute('aria-label',t('forward').replace('{n}',n));}$('seek').oninput=()=>seek(Number($('seek').value));
